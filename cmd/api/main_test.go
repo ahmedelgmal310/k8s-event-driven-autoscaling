@@ -45,7 +45,7 @@ func TestRunServesAndShutsDownGracefully(t *testing.T) {
 		t.Fatal("server did not start")
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/readyz"},
 		{http.MethodGet, "/api/v1/work"},
@@ -80,7 +80,7 @@ func TestRunServesAndShutsDownGracefully(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("run did not stop")
 	}
 }

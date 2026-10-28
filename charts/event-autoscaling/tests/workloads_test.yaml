@@ -119,8 +119,10 @@ tests:
       - hasDocuments:
           count: 0
 
+  # Helm renders templates in reverse name order and stops at the first
+  # error, so the failure surfaces in worker.yaml.
   - it: requires an address when the in-chart Redis is disabled
-    template: templates/api.yaml
+    template: templates/worker.yaml
     set:
       redis.enabled: false
     asserts:

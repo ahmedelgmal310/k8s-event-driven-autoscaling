@@ -3,7 +3,8 @@ package cpuwork
 import "testing"
 
 func TestBurnIsDeterministic(t *testing.T) {
-	if Burn(3) != Burn(3) {
+	a, b := Burn(3), Burn(3)
+	if a != b {
 		t.Fatal("Burn must be deterministic")
 	}
 	if Burn(1) == Burn(2) {

@@ -23,8 +23,8 @@ API="${RELEASE}-api"
 WORKER="${RELEASE}-worker"
 REDIS="${RELEASE}-redis"
 HPA="keda-hpa-${API}"
-STREAM=jobs
-GROUP=workers
+STREAM="jobs"
+GROUP="workers"
 
 mkdir -p "$RESULTS_DIR"
 SAMPLER_PIDS=()

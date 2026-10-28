@@ -81,7 +81,6 @@ type fakeQueue struct {
 	removeErr error
 	acked     []string
 	reads     atomic.Int64
-	readBlock chan struct{}
 }
 
 func (f *fakeQueue) Read(ctx context.Context, _ string, _ int64, block time.Duration) ([]queue.Message, error) {
