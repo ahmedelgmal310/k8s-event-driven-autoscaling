@@ -1,0 +1,19 @@
+apiVersion: v2
+name: event-autoscaling
+description: Go API and Redis Streams worker, autoscaled by KEDA on CPU, request rate and queue lag (worker scales to zero)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.33.0-0"
+home: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling
+sources:
+  - https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling
+maintainers:
+  - name: Ahmed Elgamal
+    url: https://github.com/ahmedelgmal310
+keywords:
+  - keda
+  - autoscaling
+  - hpa
+  - redis-streams
+  - scale-to-zero

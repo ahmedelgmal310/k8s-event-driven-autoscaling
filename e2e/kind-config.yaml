@@ -1,0 +1,19 @@
+# Five-node kind cluster: one control plane, one "infra" node for the platform
+# (KEDA, Prometheus, metrics-server, Redis, k6) and three "app" nodes that
+# e2e/setup.sh labels as zones a, b and c for topology spread.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      pool: infra
+  - role: worker
+    labels:
+      pool: app
+  - role: worker
+    labels:
+      pool: app
+  - role: worker
+    labels:
+      pool: app

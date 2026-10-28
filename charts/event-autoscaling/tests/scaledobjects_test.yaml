@@ -1,0 +1,98 @@
+suite: KEDA ScaledObjects
+templates:
+  - templates/scaledobjects.yaml
+release:
+  name: demo
+  namespace: demo
+tests:
+  - it: scales the API on CPU and on Prometheus requests/s per pod
+    documentSelector:
+      path: metadata.name
+      value: demo-api
+    asserts:
+      - isKind:
+          of: ScaledObject
+      - equal:
+          path: spec.scaleTargetRef.name
+          value: demo-api
+      - equal:
+          path: spec.minReplicaCount
+          value: 2
+      - equal:
+          path: spec.triggers[0]
+          value:
+            type: cpu
+            metricType: Utilization
+            metadata:
+              value: "70"
+      - equal:
+          path: spec.triggers[1].type
+          value: prometheus
+      - equal:
+          path: spec.triggers[1].metricType
+          value: AverageValue
+      - equal:
+          path: spec.triggers[1].metadata.threshold
+          value: "40"
+      - equal:
+          path: spec.triggers[1].metadata.query
+          value: sum(rate(http_requests_total{namespace="demo",pod=~"demo-api-.*",route=~"/api/v1/.*"}[1m]))
+
+  - it: scales the worker to zero on consumer-group lag
+    documentSelector:
+      path: metadata.name
+      value: demo-worker
+    asserts:
+      - equal:
+          path: spec.minReplicaCount
+          value: 0
+      - equal:
+          path: spec.cooldownPeriod
+          value: 300
+      - equal:
+          path: spec.triggers[0].type
+          value: redis-streams
+      - equal:
+          path: spec.triggers[0].metadata
+          value:
+            address: demo-redis.demo.svc.cluster.local:6379
+            stream: jobs
+            consumerGroup: workers
+            lagCount: "50"
+            activationLagCount: "0"
+
+  - it: points the worker trigger at the external Redis in prod
+    values:
+      - ../../../environments/prod/values.yaml
+    documentSelector:
+      path: metadata.name
+      value: demo-worker
+    asserts:
+      - equal:
+          path: spec.triggers[0].metadata.address
+          value: jobs.redis.prod.internal:6379
+      - equal:
+          path: spec.maxReplicaCount
+          value: 40
+
+  - it: uses the shortened e2e timings
+    values:
+      - ../../../e2e/values-e2e.yaml
+    documentSelector:
+      path: metadata.name
+      value: demo-worker
+    asserts:
+      - equal:
+          path: spec.cooldownPeriod
+          value: 30
+      - equal:
+          path: spec.pollingInterval
+          value: 5
+
+  - it: renders nothing when autoscaling is disabled
+    set:
+      api.autoscaling.enabled: false
+      worker.autoscaling.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

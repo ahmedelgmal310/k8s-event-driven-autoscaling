@@ -1,0 +1,74 @@
+{{- $full := include "ea.fullname" . -}}
+{{- with .Values.api.autoscaling }}
+{{- if .enabled }}
+# API: KEDA creates and owns the HPA "keda-hpa-<name>". Two triggers, the HPA
+# takes the larger desired replica count:
+#   cpu         average utilization of the CPU request
+#   prometheus  requests/s across the API divided by the target per pod
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $full }}-api
+  labels:
+    {{- include "ea.labels" (dict "ctx" $ "component" "api") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $full }}-api
+  minReplicaCount: {{ .minReplicas }}
+  maxReplicaCount: {{ .maxReplicas }}
+  pollingInterval: {{ .pollingInterval }}
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      behavior:
+        {{- toYaml .behavior | nindent 8 }}
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ .cpuUtilization | quote }}
+    - type: prometheus
+      name: requests-per-second
+      metricType: AverageValue
+      metadata:
+        serverAddress: {{ .prometheusAddress }}
+        query: 'sum(rate(http_requests_total{namespace="{{ $.Release.Namespace }}",pod=~"{{ $full }}-api-.*",route=~"/api/v1/.*"}[{{ .rateWindow }}]))'
+        threshold: {{ .requestsPerSecondPerPod | quote }}
+        ignoreNullValues: "true"
+{{- end }}
+{{- end }}
+{{- with .Values.worker.autoscaling }}
+{{- if .enabled }}
+---
+# Worker: scaled on the consumer-group lag (entries not yet delivered to any
+# worker). Lag is the only Redis Streams metric that supports scaling to and
+# from zero; KEDA itself handles 0 <-> 1, the HPA handles 1 <-> max.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $full }}-worker
+  labels:
+    {{- include "ea.labels" (dict "ctx" $ "component" "worker") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $full }}-worker
+  minReplicaCount: {{ .minReplicas }}
+  maxReplicaCount: {{ .maxReplicas }}
+  pollingInterval: {{ .pollingInterval }}
+  cooldownPeriod: {{ .cooldownPeriod }}
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      behavior:
+        {{- toYaml .behavior | nindent 8 }}
+  triggers:
+    - type: redis-streams
+      name: consumer-group-lag
+      metadata:
+        address: {{ include "ea.redisAddress" $ }}
+        stream: {{ $.Values.queue.stream }}
+        consumerGroup: {{ $.Values.queue.consumerGroup }}
+        lagCount: {{ .lagPerReplica | quote }}
+        activationLagCount: {{ .activationLag | quote }}
+{{- end }}
+{{- end }}

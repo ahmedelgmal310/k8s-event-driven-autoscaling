@@ -1,0 +1,8 @@
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+**/*_test.go
+cmd/chartgen/
+internal/chart/

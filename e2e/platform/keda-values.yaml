@@ -1,0 +1,22 @@
+# kedacore/keda for the kind e2e: pinned to the infra node, small requests.
+nodeSelector:
+  pool: infra
+resources:
+  operator:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      memory: 600Mi
+  metricServer:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      memory: 600Mi
+  webhooks:
+    requests:
+      cpu: 10m
+      memory: 50Mi
+    limits:
+      memory: 300Mi

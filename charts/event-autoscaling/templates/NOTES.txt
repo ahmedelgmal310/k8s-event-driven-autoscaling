@@ -1,0 +1,8 @@
+{{ include "ea.fullname" . }} is installed in namespace {{ .Release.Namespace }}.
+
+Watch the autoscalers (KEDA owns the HPAs):
+  kubectl -n {{ .Release.Namespace }} get scaledobject,hpa,deploy -w
+
+Queue backlog (lag = not yet delivered, pending = delivered but not acknowledged):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ea.fullname" . }}-api 8080:{{ .Values.api.service.port }}
+  curl -s localhost:8080/api/v1/queue

@@ -1,0 +1,14 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+# Same rules as files/alerts.yaml, which CI unit-tests with promtool.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "ea.fullname" . }}-autoscaling
+  labels:
+    {{- include "ea.labels" (dict "ctx" . "component" "monitoring") | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- .Files.Get "files/alerts.yaml" | fromYaml | toYaml | nindent 2 }}
+{{- end }}

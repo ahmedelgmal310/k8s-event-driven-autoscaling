@@ -1,0 +1,216 @@
+# promtool test rules tests/alerts/alerts_test.yaml
+rule_files:
+  - ../../charts/event-autoscaling/files/alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # --- AutoscalerAtMaxReplicas -------------------------------------------
+  - name: HPA pinned at max fires after 10m, not before
+    interval: 1m
+    input_series:
+      - series: 'kube_horizontalpodautoscaler_status_current_replicas{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-api"}'
+        values: "4 10x15"
+      - series: 'kube_horizontalpodautoscaler_spec_max_replicas{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-api"}'
+        values: "10x16"
+      # A non-KEDA HPA at max is out of scope for this alert.
+      - series: 'kube_horizontalpodautoscaler_status_current_replicas{namespace="other",horizontalpodautoscaler="web"}'
+        values: "3x16"
+      - series: 'kube_horizontalpodautoscaler_spec_max_replicas{namespace="other",horizontalpodautoscaler="web"}'
+        values: "3x16"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: AutoscalerAtMaxReplicas
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: AutoscalerAtMaxReplicas
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+              horizontalpodautoscaler: keda-hpa-demo-api
+            exp_annotations:
+              summary: "keda-hpa-demo-api has been at max replicas for 10m"
+              description: "Raise maxReplicaCount, add capacity, or find what is driving demand."
+              runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#autoscaler-at-max-replicas
+
+  - name: HPA below max never fires
+    interval: 1m
+    input_series:
+      - series: 'kube_horizontalpodautoscaler_status_current_replicas{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-worker"}'
+        values: "9x30"
+      - series: 'kube_horizontalpodautoscaler_spec_max_replicas{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-worker"}'
+        values: "10x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: AutoscalerAtMaxReplicas
+        exp_alerts: []
+
+  # --- AutoscalerMetricsUnavailable --------------------------------------
+  - name: ScalingActive=false for 5m fires
+    interval: 1m
+    input_series:
+      - series: 'kube_horizontalpodautoscaler_status_condition{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-api",condition="ScalingActive",status="false"}'
+        values: "0 0 1x10"
+      - series: 'kube_horizontalpodautoscaler_status_condition{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-api",condition="ScalingActive",status="true"}'
+        values: "1 1 0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AutoscalerMetricsUnavailable
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: AutoscalerMetricsUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+              horizontalpodautoscaler: keda-hpa-demo-api
+            exp_annotations:
+              summary: "keda-hpa-demo-api cannot compute replicas (ScalingActive=false)"
+              runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#autoscaler-metrics-unavailable
+
+  # --- QueueBacklogGrowing -----------------------------------------------
+  - name: large and rising backlog fires; large but draining does not
+    interval: 1m
+    input_series:
+      # Two API pods report the same queue: the rule must not double count.
+      - series: 'jobs_queue_lag{namespace="demo",pod="demo-api-a"}'
+        values: "1000+100x30"
+      - series: 'jobs_queue_lag{namespace="demo",pod="demo-api-b"}'
+        values: "1000+100x30"
+      - series: 'jobs_queue_lag{namespace="drain",pod="drain-api-a"}'
+        values: "5000-100x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: QueueBacklogGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+            exp_annotations:
+              summary: "Job backlog in demo is 3.5k and growing"
+              runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#queue-backlog-growing
+
+  - name: small rising backlog does not fire
+    interval: 1m
+    input_series:
+      - series: 'jobs_queue_lag{namespace="demo",pod="demo-api-a"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: QueueBacklogGrowing
+        exp_alerts: []
+
+  # --- QueueNotDraining ----------------------------------------------------
+  - name: lag with zero workers fires (scale-from-zero broken)
+    interval: 1m
+    input_series:
+      - series: 'jobs_queue_lag{namespace="demo",pod="demo-api-a"}'
+        values: "0 0 200x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: QueueNotDraining
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: QueueNotDraining
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: demo
+            exp_annotations:
+              summary: "200 jobs waiting in demo and no worker is processing"
+              runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#queue-not-draining
+
+  - name: lag while workers are processing does not fire
+    interval: 1m
+    input_series:
+      - series: 'jobs_queue_lag{namespace="demo",pod="demo-api-a"}'
+        values: "200x15"
+      - series: 'worker_jobs_processed_total{namespace="demo",pod="demo-worker-a",result="ok"}'
+        values: "0+600x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: QueueNotDraining
+        exp_alerts: []
+
+  # --- QueueStatsUnavailable -----------------------------------------------
+  - name: queue stats down for 5m fires
+    interval: 1m
+    input_series:
+      - series: 'jobs_queue_up{namespace="demo",pod="demo-api-a"}'
+        values: "1 0x10"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: QueueStatsUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+            exp_annotations:
+              summary: "The API cannot read queue stats from Redis in demo"
+              runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#queue-not-draining
+
+  # --- ApiLatencySLOBreach -------------------------------------------------
+  - name: p95 above 250ms for 10m fires
+    interval: 1m
+    input_series:
+      # 100 req/min, 10 under 100ms and 90 between 250ms and 500ms: p95 > 250ms.
+      - series: 'http_request_duration_seconds_bucket{namespace="demo",route="/api/v1/work",code="200",le="0.1"}'
+        values: "0+10x20"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo",route="/api/v1/work",code="200",le="0.25"}'
+        values: "0+10x20"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo",route="/api/v1/work",code="200",le="0.5"}'
+        values: "0+100x20"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo",route="/api/v1/work",code="200",le="+Inf"}'
+        values: "0+100x20"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: ApiLatencySLOBreach
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+            exp_annotations:
+              summary: "API p95 latency in demo is 486.1ms (SLO 250ms)"
+              runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#api-latency-or-errors
+
+  - name: fast API does not fire
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{namespace="demo",route="/api/v1/work",code="200",le="0.01"}'
+        values: "0+100x20"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo",route="/api/v1/work",code="200",le="+Inf"}'
+        values: "0+100x20"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: ApiLatencySLOBreach
+        exp_alerts: []
+
+  # --- ApiErrorRateHigh ----------------------------------------------------
+  - name: 5 percent errors fires; probes and metrics are excluded
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="demo",route="/api/v1/work",method="GET",code="200"}'
+        values: "0+95x10"
+      - series: 'http_requests_total{namespace="demo",route="/api/v1/work",method="GET",code="503"}'
+        values: "0+5x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ApiErrorRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: demo
+            exp_annotations:
+              summary: "API 5xx ratio in demo is 5%"
+              runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#api-latency-or-errors
+
+  - name: no errors does not fire
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="demo",route="/api/v1/work",method="GET",code="200"}'
+        values: "0+100x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ApiErrorRateHigh
+        exp_alerts: []

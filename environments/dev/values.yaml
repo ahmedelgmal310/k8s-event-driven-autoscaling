@@ -1,0 +1,39 @@
+# dev: smallest footprint, in-cluster Redis, fast feedback.
+image:
+  tag: "0.1.0"
+
+topologySpread:
+  zone:
+    whenUnsatisfiable: ScheduleAnyway # single-zone dev clusters
+
+api:
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 3
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        selectPolicy: Max
+        policies:
+          - type: Pods
+            value: 2
+            periodSeconds: 30
+      scaleDown:
+        stabilizationWindowSeconds: 60
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 60
+  pdb:
+    enabled: false # one replica: a PDB would block node drains
+
+worker:
+  autoscaling:
+    maxReplicas: 3
+    cooldownPeriod: 60
+
+networkPolicy:
+  allowedNamespaces:
+    - monitoring
+    - ingress-nginx

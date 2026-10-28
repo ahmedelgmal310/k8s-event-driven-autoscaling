@@ -1,0 +1,74 @@
+suite: disruption budgets, network policy and alerts
+release:
+  name: demo
+  namespace: demo
+tests:
+  - it: limits voluntary disruption of the API to one pod at a time
+    template: templates/api.yaml
+    documentSelector:
+      path: kind
+      value: PodDisruptionBudget
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+
+  - it: uses maxUnavailable for the worker so the budget never blocks scale to zero
+    template: templates/worker.yaml
+    documentSelector:
+      path: kind
+      value: PodDisruptionBudget
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+      - notExists:
+          path: spec.minAvailable
+
+  - it: lets only the API, the workers and KEDA reach Redis
+    template: templates/networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: demo-redis
+    asserts:
+      - contains:
+          path: spec.ingress[0].from
+          content:
+            namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: keda
+      - lengthEqual:
+          path: spec.ingress[0].from
+          count: 3
+
+  - it: admits API traffic only from the allowed namespaces
+    template: templates/networkpolicy.yaml
+    values:
+      - ../../../e2e/values-e2e.yaml
+    documentSelector:
+      path: metadata.name
+      value: demo-api
+    asserts:
+      - lengthEqual:
+          path: spec.ingress[0].from
+          count: 2
+      - contains:
+          path: spec.ingress[0].from
+          content:
+            namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: loadtest
+
+  - it: renders the PrometheusRule from the promtool-tested rule file
+    template: templates/prometheusrule.yaml
+    values:
+      - ../../../environments/prod/values.yaml
+    asserts:
+      - isKind:
+          of: PrometheusRule
+      - equal:
+          path: spec.groups[0].rules[0].alert
+          value: AutoscalerAtMaxReplicas
+      - lengthEqual:
+          path: spec.groups[0].rules
+          count: 7

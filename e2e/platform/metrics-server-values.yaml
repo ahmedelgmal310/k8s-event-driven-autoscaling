@@ -1,0 +1,12 @@
+# metrics-server for the CPU trigger. kind kubelets serve self-signed certs.
+nodeSelector:
+  pool: infra
+args:
+  - --kubelet-insecure-tls
+  - --kubelet-preferred-address-types=InternalIP
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

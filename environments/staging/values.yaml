@@ -1,0 +1,24 @@
+# staging: production shape at lower ceilings, in-cluster Redis.
+image:
+  tag: "0.1.0"
+
+api:
+  autoscaling:
+    minReplicas: 2
+    maxReplicas: 6
+
+worker:
+  autoscaling:
+    maxReplicas: 8
+    cooldownPeriod: 120
+
+networkPolicy:
+  allowedNamespaces:
+    - monitoring
+    - ingress-nginx
+
+monitoring:
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack

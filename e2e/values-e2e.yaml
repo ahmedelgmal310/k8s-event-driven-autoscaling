@@ -1,0 +1,79 @@
+# Overrides for the kind end-to-end test (e2e/run.sh). Timings are shortened so
+# a full scale-out / scale-in / scale-to-zero cycle fits in a CI job.
+image:
+  repository: event-autoscaling
+  tag: e2e
+  pullPolicy: Never # side-loaded with `kind load`
+
+# App pods run on the three "app" nodes (one per zone); Redis and the
+# platform components run on the "infra" node, so draining an app node never
+# takes the queue or the load generator down with it.
+redis:
+  nodeSelector:
+    pool: infra
+
+api:
+  workIterations: 3000
+  preStopSleepSeconds: 5
+  affinity: &appPool
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: pool
+                operator: In
+                values: ["app"]
+  autoscaling:
+    minReplicas: 2
+    maxReplicas: 10
+    pollingInterval: 5
+    rateWindow: 30s
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 15
+          - type: Pods
+            value: 4
+            periodSeconds: 15
+      scaleDown:
+        stabilizationWindowSeconds: 30
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 50
+            periodSeconds: 15
+
+worker:
+  concurrency: 4
+  processTime: 100ms
+  affinity: *appPool
+  autoscaling:
+    minReplicas: 0
+    maxReplicas: 10
+    pollingInterval: 5
+    cooldownPeriod: 30
+    lagPerReplica: 50
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        selectPolicy: Max
+        policies:
+          - type: Pods
+            value: 10
+            periodSeconds: 10
+      scaleDown:
+        stabilizationWindowSeconds: 15
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 15
+
+networkPolicy:
+  allowedNamespaces:
+    - monitoring
+    - loadtest

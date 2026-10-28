@@ -1,0 +1,56 @@
+# Lean prometheus-community/prometheus for the kind e2e: one server scraping
+# annotated pods every 5s (the API autoscaler reads request rate from it) and
+# kube-state-metrics for the HPA series used by the alert rules.
+# The alert rules are added by e2e/setup.sh from charts/event-autoscaling/files/alerts.yaml.
+alertmanager:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+
+kube-state-metrics:
+  enabled: true
+  nodeSelector:
+    pool: infra
+  collectors:
+    - deployments
+    - horizontalpodautoscalers
+    - pods
+
+server:
+  nodeSelector:
+    pool: infra
+  global:
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    evaluation_interval: 15s
+  retention: 2h
+  persistentVolume:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+configmapReload:
+  prometheus:
+    enabled: false
+
+scrapeConfigs:
+  kubernetes-api-servers:
+    enabled: false
+  kubernetes-nodes:
+    enabled: false
+  kubernetes-nodes-cadvisor:
+    enabled: false
+  kubernetes-service-endpoints-slow:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  kubernetes-services:
+    enabled: false
+  kubernetes-pods-slow:
+    enabled: false

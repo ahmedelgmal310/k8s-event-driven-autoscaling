@@ -1,0 +1,60 @@
+# prod: managed Redis, three zones, higher floor and ceiling, conservative
+# scale-in. Replica floor 3 = one per zone, so a zone loss keeps 2/3 capacity.
+image:
+  tag: "0.1.0"
+
+redis:
+  enabled: false
+  address: jobs.redis.prod.internal:6379
+
+api:
+  workIterations: 1000
+  resources:
+    requests:
+      cpu: 200m
+      memory: 48Mi
+    limits:
+      memory: 192Mi
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 30
+    pollingInterval: 15
+    cpuUtilization: 65
+    requestsPerSecondPerPod: 60
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 30
+          - type: Pods
+            value: 6
+            periodSeconds: 30
+      scaleDown:
+        stabilizationWindowSeconds: 600
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 20
+            periodSeconds: 120
+
+worker:
+  concurrency: 8
+  autoscaling:
+    minReplicas: 0
+    maxReplicas: 40
+    cooldownPeriod: 600
+    lagPerReplica: 100
+
+networkPolicy:
+  allowedNamespaces:
+    - monitoring
+    - ingress-nginx
+
+monitoring:
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack

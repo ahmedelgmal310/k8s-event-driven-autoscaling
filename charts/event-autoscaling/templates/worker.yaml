@@ -1,0 +1,112 @@
+{{- $name := printf "%s-worker" (include "ea.fullname" .) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ea.labels" (dict "ctx" . "component" "worker") | nindent 4 }}
+spec:
+  {{- if not .Values.worker.autoscaling.enabled }}
+  replicas: 1
+  {{- end }}
+  # Replicas are owned by KEDA (0..max); see scaledobjects.yaml.
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "ea.selectorLabels" (dict "ctx" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ea.selectorLabels" (dict "ctx" . "component" "worker") | nindent 8 }}
+      {{- if .Values.monitoring.podAnnotations }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.worker.metricsPort | quote }}
+        prometheus.io/path: /metrics
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # Long enough to finish the jobs in flight after SIGTERM: one blocking
+      # read plus concurrency x (processTime + CPU work).
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "ea.topologySpread" (dict "ctx" . "component" "worker") | nindent 6 }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "ea.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/worker"]
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.worker.metricsPort }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: METRICS_ADDR
+              value: ":{{ .Values.worker.metricsPort }}"
+            - name: REDIS_ADDR
+              value: {{ include "ea.redisAddress" . | quote }}
+            - name: STREAM
+              value: {{ .Values.queue.stream | quote }}
+            - name: CONSUMER_GROUP
+              value: {{ .Values.queue.consumerGroup | quote }}
+            - name: CONCURRENCY
+              value: {{ .Values.worker.concurrency | quote }}
+            - name: PROCESS_TIME
+              value: {{ .Values.worker.processTime | quote }}
+            - name: WORK_ITERATIONS
+              value: {{ .Values.worker.workIterations | quote }}
+            - name: RECLAIM_IDLE
+              value: {{ .Values.worker.reclaimIdle | quote }}
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: requests.cpu
+                  divisor: "1"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- include "ea.containerSecurityContext" . | nindent 12 }}
+{{- if .Values.worker.pdb.enabled }}
+---
+# maxUnavailable (not minAvailable) so the budget never blocks scale to zero.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ea.labels" (dict "ctx" . "component" "worker") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.worker.pdb.maxUnavailable }}
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      {{- include "ea.selectorLabels" (dict "ctx" . "component" "worker") | nindent 6 }}
+{{- end }}

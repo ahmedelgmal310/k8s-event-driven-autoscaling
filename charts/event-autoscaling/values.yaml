@@ -1,0 +1,177 @@
+# Defaults are production-shaped. environments/<env>/values.yaml and
+# e2e/values-e2e.yaml override what differs per environment.
+
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/ahmedelgmal310/event-autoscaling
+  tag: "" # defaults to the chart appVersion
+  digest: "" # optional sha256:... pin
+  pullPolicy: IfNotPresent
+
+# Redis Streams carries the jobs. The in-chart Redis is a single ephemeral
+# instance for dev and CI; production points redis.address at a managed Redis.
+redis:
+  enabled: true
+  address: "" # host:port; required when enabled is false
+  image: mirror.gcr.io/library/redis:8.6.6-alpine@sha256:23a604374ece8069b34131faac7a1f05ae73c64280e46af1de844f29af2846d4
+  maxMemory: 200mb
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+
+queue:
+  stream: jobs
+  consumerGroup: workers
+  maxLen: 100000 # approximate cap on stream length (XADD MAXLEN ~)
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Spread replicas so one zone or node failure (or drain) removes only a
+# fraction of capacity. Applied to the API and the worker.
+topologySpread:
+  zone:
+    enabled: true
+    maxSkew: 1
+    whenUnsatisfiable: DoNotSchedule
+  hostname:
+    enabled: true
+    maxSkew: 1
+    whenUnsatisfiable: ScheduleAnyway
+
+api:
+  # Fixed replica count, used only when api.autoscaling.enabled is false.
+  replicas: 2
+  # CPU cost of one /api/v1/work request (chained SHA-256 rounds).
+  workIterations: 1000
+  # Graceful shutdown: the preStop sleep keeps the pod serving while the
+  # endpoint removal propagates to every node; then the server drains
+  # in-flight requests for up to shutdownTimeout.
+  preStopSleepSeconds: 5
+  shutdownDelay: 0s
+  shutdownTimeout: 20s
+  terminationGracePeriodSeconds: 30
+  resources:
+    requests:
+      cpu: 100m
+      memory: 32Mi
+    limits:
+      # No CPU limit on purpose: CFS throttling inflates tail latency, and the
+      # CPU request already drives scheduling and the utilization target.
+      memory: 128Mi
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  service:
+    port: 80
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    pollingInterval: 15
+    # Trigger 1: average CPU utilization, as a percentage of the CPU request.
+    cpuUtilization: 70
+    # Trigger 2: requests per second per pod, from Prometheus.
+    requestsPerSecondPerPod: 40
+    prometheusAddress: http://prometheus-server.monitoring.svc.cluster.local
+    rateWindow: 1m
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 15
+          - type: Pods
+            value: 4
+            periodSeconds: 15
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 50
+            periodSeconds: 60
+
+worker:
+  # Jobs processed in parallel per pod; each job is processTime of simulated
+  # I/O plus workIterations of CPU.
+  concurrency: 4
+  processTime: 100ms
+  workIterations: 200
+  # A job held unacknowledged for longer than reclaimIdle (crashed pod) is
+  # taken over by another worker.
+  reclaimIdle: 60s
+  terminationGracePeriodSeconds: 30
+  metricsPort: 9090
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  autoscaling:
+    enabled: true
+    # 0 = scale to zero when the queue is idle.
+    minReplicas: 0
+    maxReplicas: 20
+    pollingInterval: 10
+    # Seconds the queue must stay empty before the last worker is removed.
+    cooldownPeriod: 300
+    # Target consumer-group lag per worker replica.
+    lagPerReplica: 50
+    # Lag at or below this value does not wake the workers from zero.
+    activationLag: 0
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        selectPolicy: Max
+        policies:
+          - type: Pods
+            value: 10
+            periodSeconds: 15
+      scaleDown:
+        stabilizationWindowSeconds: 60
+        selectPolicy: Max
+        policies:
+          - type: Percent
+            value: 50
+            periodSeconds: 30
+
+networkPolicy:
+  enabled: true
+  # Namespaces allowed to call the API (ingress controller, load generators).
+  allowedNamespaces:
+    - monitoring
+  monitoringNamespace: monitoring
+  # The KEDA operator reads the consumer-group lag directly from Redis.
+  kedaNamespace: keda
+
+monitoring:
+  # Prometheus pod-annotation scraping (prometheus.io/scrape).
+  podAnnotations: true
+  # PrometheusRule for clusters running the Prometheus Operator.
+  prometheusRule:
+    enabled: false
+    labels: {}

@@ -1,0 +1,95 @@
+# Alerts for the autoscaling setup. Unit-tested with promtool
+# (tests/alerts/alerts_test.yaml) and loaded into Prometheus in the kind e2e.
+# Runbook: README.md#runbook
+groups:
+  - name: event-autoscaling
+    rules:
+      - alert: AutoscalerAtMaxReplicas
+        # An HPA pinned at its ceiling cannot absorb more load: latency or
+        # backlog will grow next. KEDA names its HPAs keda-hpa-<scaledobject>.
+        expr: |
+          max by (namespace, horizontalpodautoscaler) (kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler=~"keda-hpa-.*"})
+            >= on (namespace, horizontalpodautoscaler)
+          max by (namespace, horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_max_replicas{horizontalpodautoscaler=~"keda-hpa-.*"})
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.horizontalpodautoscaler }} has been at max replicas for 10m"
+          description: "Raise maxReplicaCount, add capacity, or find what is driving demand."
+          runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#autoscaler-at-max-replicas
+
+      - alert: AutoscalerMetricsUnavailable
+        # ScalingActive=false: the HPA cannot read a metric (Prometheus or
+        # metrics-server down, broken query) and has stopped scaling.
+        expr: |
+          max by (namespace, horizontalpodautoscaler) (kube_horizontalpodautoscaler_status_condition{condition="ScalingActive",status="false"}) == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.horizontalpodautoscaler }} cannot compute replicas (ScalingActive=false)"
+          runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#autoscaler-metrics-unavailable
+
+      - alert: QueueBacklogGrowing
+        # Workers are not keeping up: the backlog is large and still rising.
+        expr: |
+          max by (namespace) (jobs_queue_lag) > 1000
+            and on (namespace)
+          max by (namespace) (deriv(jobs_queue_lag[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job backlog in {{ $labels.namespace }} is {{ $value | humanize }} and growing"
+          runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#queue-backlog-growing
+
+      - alert: QueueNotDraining
+        # Jobs are waiting but nothing is processing them: typically the
+        # scale-from-zero path is broken (KEDA cannot reach Redis, pods cannot
+        # schedule or crash on start).
+        expr: |
+          max by (namespace) (jobs_queue_lag) > 0
+            unless on (namespace)
+          sum by (namespace) (rate(worker_jobs_processed_total{result="ok"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} jobs waiting in {{ $labels.namespace }} and no worker is processing"
+          runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#queue-not-draining
+
+      - alert: QueueStatsUnavailable
+        expr: max by (namespace) (jobs_queue_up) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The API cannot read queue stats from Redis in {{ $labels.namespace }}"
+          runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#queue-not-draining
+
+      - alert: ApiLatencySLOBreach
+        # The same SLO the e2e load test enforces: p95 under 250 ms.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (namespace, le) (rate(http_request_duration_seconds_bucket{route=~"/api/v1/.*"}[5m]))
+          ) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency in {{ $labels.namespace }} is {{ $value | humanizeDuration }} (SLO 250ms)"
+          runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#api-latency-or-errors
+
+      - alert: ApiErrorRateHigh
+        expr: |
+          sum by (namespace) (rate(http_requests_total{route=~"/api/v1/.*",code=~"5.."}[5m]))
+            /
+          sum by (namespace) (rate(http_requests_total{route=~"/api/v1/.*"}[5m]))
+            > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API 5xx ratio in {{ $labels.namespace }} is {{ $value | humanizePercentage }}"
+          runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#api-latency-or-errors

@@ -1,0 +1,112 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $full := include "ea.fullname" . -}}
+{{- $np := .Values.networkPolicy -}}
+# API: ingress on the http port from the allowed namespaces only; egress to
+# DNS and Redis only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $full }}-api
+  labels:
+    {{- include "ea.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ea.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range (append $np.allowedNamespaces $np.monitoringNamespace | uniq) }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - port: http
+  egress:
+    {{- include "ea.egressDNS" . | nindent 4 }}
+    {{- include "ea.egressRedis" . | nindent 4 }}
+---
+# Worker: no inbound traffic except Prometheus scrapes; egress to DNS and Redis.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $full }}-worker
+  labels:
+    {{- include "ea.labels" (dict "ctx" . "component" "worker") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ea.selectorLabels" (dict "ctx" . "component" "worker") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.monitoringNamespace }}
+      ports:
+        - port: metrics
+  egress:
+    {{- include "ea.egressDNS" . | nindent 4 }}
+    {{- include "ea.egressRedis" . | nindent 4 }}
+{{- if .Values.redis.enabled }}
+---
+# Redis: reachable from the API, the workers and the KEDA operator (which
+# reads the consumer-group lag). Nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $full }}-redis
+  labels:
+    {{- include "ea.labels" (dict "ctx" . "component" "redis") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ea.selectorLabels" (dict "ctx" . "component" "redis") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "ea.selectorLabels" (dict "ctx" . "component" "api") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "ea.selectorLabels" (dict "ctx" . "component" "worker") | nindent 14 }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.kedaNamespace }}
+      ports:
+        - port: redis
+  egress: []
+{{- end }}
+{{- end }}
+
+{{- define "ea.egressDNS" -}}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+{{- end }}
+
+{{- define "ea.egressRedis" -}}
+{{- if .Values.redis.enabled -}}
+- to:
+    - podSelector:
+        matchLabels:
+          {{- include "ea.selectorLabels" (dict "ctx" . "component" "redis") | nindent 10 }}
+  ports:
+    - port: 6379
+{{- else -}}
+# External Redis: the address is outside the cluster, so allow its port only.
+- ports:
+    - port: 6379
+{{- end }}
+{{- end }}
