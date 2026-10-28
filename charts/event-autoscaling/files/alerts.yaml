@@ -22,8 +22,13 @@ groups:
       - alert: AutoscalerMetricsUnavailable
         # ScalingActive=false: the HPA cannot read a metric (Prometheus or
         # metrics-server down, broken query) and has stopped scaling.
+        # An HPA whose target KEDA scaled to zero also reports
+        # ScalingActive=false (ScalingDisabled) by design, so only HPAs with
+        # running replicas count; QueueNotDraining covers the zero case.
         expr: |
           max by (namespace, horizontalpodautoscaler) (kube_horizontalpodautoscaler_status_condition{condition="ScalingActive",status="false"}) == 1
+            and on (namespace, horizontalpodautoscaler)
+          max by (namespace, horizontalpodautoscaler) (kube_horizontalpodautoscaler_status_current_replicas) > 0
         for: 5m
         labels:
           severity: warning

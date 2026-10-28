@@ -62,14 +62,17 @@ api:
   shutdownDelay: 0s
   shutdownTimeout: 20s
   terminationGracePeriodSeconds: 30
+  # Sized from the e2e measurement (docs/tuning.md): ~29m CPU and 11Mi per
+  # pod at ~43 req/s per pod. A 50m request puts the CPU trigger at ~55% at
+  # the 40 req/s target, so CPU is a real second signal, not a dead one.
   resources:
     requests:
-      cpu: 100m
-      memory: 32Mi
+      cpu: 50m
+      memory: 16Mi
     limits:
       # No CPU limit on purpose: CFS throttling inflates tail latency, and the
       # CPU request already drives scheduling and the utilization target.
-      memory: 128Mi
+      memory: 64Mi
   nodeSelector: {}
   affinity: {}
   tolerations: []
@@ -119,12 +122,13 @@ worker:
   reclaimIdle: 60s
   terminationGracePeriodSeconds: 30
   metricsPort: 9090
+  # Measured ~12m CPU and 9Mi per worker at full concurrency (docs/tuning.md).
   resources:
     requests:
-      cpu: 50m
-      memory: 32Mi
+      cpu: 25m
+      memory: 16Mi
     limits:
-      memory: 128Mi
+      memory: 64Mi
   nodeSelector: {}
   affinity: {}
   tolerations: []

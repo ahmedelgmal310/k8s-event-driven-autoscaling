@@ -90,7 +90,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].resources.requests.cpu
-          value: 100m
+          value: 50m
       - exists:
           path: spec.template.spec.containers[0].resources.limits.memory
       - notExists:

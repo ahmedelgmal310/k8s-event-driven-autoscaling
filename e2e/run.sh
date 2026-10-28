@@ -380,6 +380,7 @@ ksm_max=$(prom_query "kube_horizontalpodautoscaler_spec_max_replicas{horizontalp
 [[ $ksm_max == 10 ]] || die "kube-state-metrics HPA series missing (got '${ksm_max}')"
 firing=$(kubectl get --raw "/api/v1/namespaces/monitoring/services/prometheus-server:80/proxy/api/v1/alerts" \
   | jq -r '[.data.alerts[] | "\(.labels.alertname)(\(.state))"] | join(" ")')
+[[ $firing != *"(firing)"* ]] || die "alerts firing after the scenarios: ${firing}"
 
 # --- Results ----------------------------------------------------------------
 jq -n \

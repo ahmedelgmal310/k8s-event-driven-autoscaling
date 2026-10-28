@@ -54,6 +54,8 @@ tests:
         values: "0 0 1x10"
       - series: 'kube_horizontalpodautoscaler_status_condition{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-api",condition="ScalingActive",status="true"}'
         values: "1 1 0x10"
+      - series: 'kube_horizontalpodautoscaler_status_current_replicas{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-api"}'
+        values: "2x12"
     alert_rule_test:
       - eval_time: 5m
         alertname: AutoscalerMetricsUnavailable
@@ -68,6 +70,18 @@ tests:
             exp_annotations:
               summary: "keda-hpa-demo-api cannot compute replicas (ScalingActive=false)"
               runbook_url: https://github.com/ahmedelgmal310/k8s-event-driven-autoscaling#autoscaler-metrics-unavailable
+
+  - name: an HPA scaled to zero by KEDA (ScalingDisabled) does not fire
+    interval: 1m
+    input_series:
+      - series: 'kube_horizontalpodautoscaler_status_condition{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-worker",condition="ScalingActive",status="false"}'
+        values: "1x20"
+      - series: 'kube_horizontalpodautoscaler_status_current_replicas{namespace="demo",horizontalpodautoscaler="keda-hpa-demo-worker"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AutoscalerMetricsUnavailable
+        exp_alerts: []
 
   # --- QueueBacklogGrowing -----------------------------------------------
   - name: large and rising backlog fires; large but draining does not

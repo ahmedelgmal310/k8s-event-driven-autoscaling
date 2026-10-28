@@ -8,13 +8,13 @@ redis:
   address: jobs.redis.prod.internal:6379
 
 api:
-  workIterations: 1000
+  # Same per-request cost as the default; 2x memory headroom over the measurement.
   resources:
     requests:
-      cpu: 200m
-      memory: 48Mi
+      cpu: 50m
+      memory: 24Mi
     limits:
-      memory: 192Mi
+      memory: 96Mi
   autoscaling:
     minReplicas: 3
     maxReplicas: 30
